@@ -8,10 +8,9 @@ import numpy as np
 import pytest
 
 from datasets.arrow_dataset import Dataset
-from datasets.search import ElasticSearchIndex, FaissIndex, MissingIndex
+from datasets.search import ElasticSearchIndex, FaissIndex, MissingIndex, MilvusIndex
 
-from .utils import require_elasticsearch, require_faiss
-
+from .utils import require_elasticsearch, require_faiss, require_milvus
 
 pytestmark = pytest.mark.integration
 
@@ -196,3 +195,100 @@ class ElasticSearchIndexTest(TestCase):
             best_indices = [indices[0] for indices in total_indices]
             self.assertGreater(np.min(best_scores), 0)
             self.assertListEqual([1, 1, 1], best_indices)
+
+
+@require_milvus
+class MilvusIndexTest(TestCase):
+    def test_simple_index(self):
+        index = MilvusIndex()
+
+        rng = np.random.default_rng(seed=19530)
+        vectors = rng.random((102, 128))
+
+        index.insert(vectors)
+        self.assertIsNotNone(index.collection)
+        self.assertEqual(index.collection.num_entities, 102)
+
+        print("Start searching based on vector similarity")
+        vector_to_search = vectors[0:]
+        scores, indices = index.search(vector_to_search, 3)
+        self.assertEqual(scores[0], 0)
+        self.assertEqual(indices[0], 0)
+
+        print("Start batch searching based on vector similarity")
+
+        vectors_to_search = vectors[0:2,:]
+        scores, indices = index.search_batch(vectors_to_search, 3)
+        self.assertEqual(scores[0][0], 0)
+        self.assertEqual(indices[0][0], 0)
+        self.assertEqual(scores[1][0], 0)
+        self.assertEqual(indices[1][0], 1)
+
+        index.remove()
+
+    def test_complex_index(self):
+        index = MilvusIndex(
+            milvus_collection_name="milvus_index_" + os.path.basename(tempfile.NamedTemporaryFile().name),
+            milvus_collection_schema=[
+                {
+                    "name": "id",
+                    "type": "VARCHAR",
+                    "description": "VARCHAR field",
+                    "is_primary": True,
+                    "auto_id": False,
+                    "params": {
+                        "max_length": 100
+                    }
+                },
+                {
+                    "name": "random",
+                    "type": "DOUBLE",
+                    "description": "DOUBLE field",
+                },
+                {
+                    "name": "vec",
+                    "type": "FLOAT_VECTOR",
+                    "description": "FLOAT_VECTOR field",
+                    "params": {
+                        "dim": 8
+                    }
+                }
+            ],
+            milvus_index_params={
+                "field": "vec",
+                "index_type": "IVF_FLAT",
+                "metric_type": "L2",
+                "params": {"nlist": 128},
+            })
+
+        dim = 8
+        num_entities = 100
+        rng = np.random.default_rng(seed=19530)
+        entities = [
+            # provide the pk field because `auto_id` is set to False
+            [str(i) for i in range(num_entities)],
+            rng.random(num_entities).tolist(),  # field random, only supports list
+            rng.random((num_entities, dim)),  # field embeddings, supports numpy.ndarray and list
+        ]
+
+        index.insert(entities)
+        self.assertIsNotNone(index.collection)
+        self.assertEqual(index.collection.num_entities, 100)
+
+        print("Start searching based on vector similarity")
+        vector_to_search = entities[2][0:1]
+        scores, indices = index.search(vector_to_search, 3)
+        self.assertEqual(scores[0], 0)
+        self.assertEqual(indices[0], '0')
+
+        print("Start batch searching based on vector similarity")
+
+        vectors_to_search = entities[2][0:2]
+        scores, indices = index.search_batch(vectors_to_search, 3)
+        self.assertEqual(scores[0][0], 0)
+        self.assertEqual(indices[0][0], '0')
+        self.assertEqual(scores[1][0], 0)
+        self.assertEqual(indices[1][0], '1')
+
+        index.remove()
+
