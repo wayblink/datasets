@@ -5557,6 +5557,134 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
             )
         return self
 
+    def add_milvus_index(
+        self,
+        index_name: Optional[str] = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        milvus_collection_schema: Optional[list] = None,
+        milvus_index_params: Optional[dict] = None,
+        batch_size: int = 1000,
+    ):
+        """Add an index using Milvus for fast retrieval.
+
+        Args:
+            index_name (Optional `str`): The index_name/identifier of the index.
+                Will create a collection with this name in Milvus and build index on it.
+            host (Optional `str`, defaults to localhost):
+                host of where ElasticSearch is running
+            port (Optional `str`, defaults to 19530):
+                port of where ElasticSearch is running
+            milvus_collection_schema (Optional `List`):
+                The schema of the Milvus collection.
+                Milvus support multi-columns schema of various datatype and hybrid search with attribute filtering.
+                The collection to create must contain a primary key field and a vector field.
+                INT64 and String are supported data type on primary key field.
+                Default schema is:
+                {
+                    "name": "pk",
+                    "type": "INT64",
+                    "is_primary": True,
+                    "auto_id": False,
+                },
+                {
+                    "name": "embeddings",
+                    "type": "FLOAT_VECTOR",
+                    "params": {
+                        "dim": 128
+                    }
+                }
+            milvus_index_params (Optional `dict`):
+                The configuration of the Milvus index.
+                Default config is:
+                {
+                    "field": "embeddings",
+                    "index_type": "IVF_FLAT",
+                    "metric_type": "L2",
+                    "params": {"nlist": 128},
+                }
+            dtype (`numpy.dtype`):
+                The dtype of the numpy arrays that are indexed. Default is np.float32.
+            batch_size (Optional `int`): Size of the batch to use while adding vectors to the Milvus. Default is 1000.
+        """
+        with self.formatted_as(type=None):
+            super().add_milvus_index(
+                index_name=index_name,
+                host=host,
+                port=port,
+                milvus_collection_schema=milvus_collection_schema,
+                milvus_index_params=milvus_index_params,
+                batch_size=batch_size
+            )
+        print("schema" + str(self.data.schema))
+        return self
+
+    def add_milvus_index_from_external_arrays(
+        self,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        index_name: Optional[str] = None,
+        milvus_collection_schema: Optional[list] = None,
+        milvus_index_params: Optional[dict] = None,
+        external_arrays: Optional[np.array] = None,
+        batch_size: int = 1000,
+        dtype=np.float32,
+    ):
+        """Add an index using Milvus for fast retrieval.
+
+        Args:
+            index_name (Optional `str`): The index_name/identifier of the index.
+                Will create a collection with this name in Milvus and build index on it.
+            host (Optional `str`, defaults to localhost):
+                host of where ElasticSearch is running
+            port (Optional `str`, defaults to 19530):
+                port of where ElasticSearch is running
+            milvus_collection_schema (Optional `List`):
+                The schema of the Milvus collection.
+                Milvus support multi-columns schema of various datatype and hybrid search with attribute filtering.
+                The collection to create must contain a primary key field and a vector field.
+                INT64 and String are supported data type on primary key field.
+                Default schema is:
+                {
+                    "name": "pk",
+                    "type": "INT64",
+                    "is_primary": True,
+                    "auto_id": False,
+                },
+                {
+                    "name": "embeddings",
+                    "type": "FLOAT_VECTOR",
+                    "params": {
+                        "dim": 128
+                    }
+                }
+            milvus_index_params (Optional `dict`):
+                The configuration of the Milvus index.
+                Default config is:
+                {
+                    "field": "embeddings",
+                    "index_type": "IVF_FLAT",
+                    "metric_type": "L2",
+                    "params": {"nlist": 128},
+                }
+            external_arrays (`np.array`):
+                Data arrays to insert into the index.
+                You can also insert by calling milvus_index.insert(arrays) after initialize
+            batch_size (Optional `int`): Size of the batch to use while adding vectors to the Milvus. Default is 1000.
+            dtype (`numpy.dtype`):
+                The dtype of the numpy arrays that are indexed. Default is np.float32.
+        """
+        super().add_milvus_index_from_external_arrays(
+            external_arrays=external_arrays,
+            index_name=index_name,
+            host=host,
+            port=port,
+            milvus_collection_schema=milvus_collection_schema,
+            milvus_index_params=milvus_index_params,
+            batch_size=batch_size,
+            dtype=dtype
+        )
+
     @transmit_format
     @fingerprint_transform(inplace=False)
     def add_item(self, item: dict, new_fingerprint: str):

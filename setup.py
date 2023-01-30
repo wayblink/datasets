@@ -179,6 +179,7 @@ TESTS_REQUIRE = [
     "soundfile",
     "transformers",
     "zstandard",
+    "pymilvus>2.2.0"
 ]
 
 
