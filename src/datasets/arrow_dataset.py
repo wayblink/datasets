@@ -5659,6 +5659,243 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
             )
         return self
 
+    def add_milvus_index(
+        self,
+        index_name: str = None,
+        column: str = None,
+        dim: int = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        milvus_collection_name: Optional[str] = None,
+        milvus_collection_schema: Optional[dict] = None,
+        milvus_index_params: Optional[dict] = {
+                    "index_type": "IVF_FLAT",
+                    "metric_type": "L2",
+                    "params": {"nlist": 128},
+                },
+        use_dataset_index_as_pk: Optional[bool] = True,
+        batch_size: Optional[int] = 1000,
+    ):
+        """Add an index using Milvus for fast retrieval.
+
+        Args:
+            index_name (`str`):
+                The index_name/identifier of the index.
+            column (`str`):
+                Column to create index on it, should be a vector column like: numpy.float32.
+            dim (`int`):
+                Dimension of vector column
+            host (`str`, *optional*, defaults to `localhost`):
+                The host of where Milvus is running.
+            port (`int`, *optional*, defaults to 19530):
+                The port of where Milvus is running.
+            milvus_collection_name (Optional `str`):
+                Will create a collection with this name in Milvus and build index on it.
+                If not set, use the `index_name`.
+            milvus_collection_schema (Optional `List`):
+                The schema of the Milvus collection.
+                Milvus support multi-columns schema of various datatype and hybrid search with attribute filtering.
+                The collection to create must contain a primary key field and a vector field.
+                Please see https://milvus.io/docs/create_collection.md for more detail.
+                If not set, will automatically generate a schema based on dataset's schema.
+            milvus_index_params (Optional `dict`):
+                The configuration of the Milvus index. Milvus support various index type to trade-off performance and cost.
+                Please see https://milvus.io/docs/build_index.md for more detail
+                Default config is:
+                    ```
+                    {
+                        "index_type": "IVF_FLAT",
+                        "metric_type": "L2",
+                        "params": {"nlist": 128},
+                    }
+                    ```
+            use_dataset_index_as_pk (`bool`, *optional*):
+                If use dataset's index as Milvus primary key.
+            batch_size (`int`, *optional*):
+                Size of the batch to use while adding vectors to the Milvus. Default is 1000.
+        """
+
+        milvus_collection_name = (
+            milvus_collection_name
+            if milvus_collection_name is not None
+            else index_name
+        )
+
+        if milvus_collection_schema is None:
+            # auto schema
+            collection_schema = []
+            pk_column_name = "pk"
+            pk_column_schema = {
+                "name": pk_column_name,
+                "type": "INT64",
+                "auto_id": False,
+                "is_primary": True,
+            }
+            collection_schema.append(pk_column_schema)
+
+            vec_column_name = column
+
+            for col in self.column_names:
+                # skip pk_column and vector_column, already appended
+                if pk_column_name == col:
+                    continue
+
+                if vec_column_name == col:
+                    vec_column_schema = {
+                        "name": vec_column_name,
+                        "type": "FLOAT_VECTOR",
+                        "params": {"dim": dim}
+                    }
+                    collection_schema.append(vec_column_schema)
+                    continue
+
+                field_dict = {
+                        "name": col,
+                        "type": self.features.get(col).dtype.upper(),
+                    }
+                if self.features.get(col).dtype == "string":
+                    field_dict["type"] = "VARCHAR"
+                    field_dict["params"] = {"max_length": 65535}
+                collection_schema.append(field_dict)
+        else:
+            collection_schema = milvus_collection_schema
+
+        milvus_index_params["field"] = column
+
+        with self.formatted_as(type=None):
+            super().add_milvus_index(
+                index_name=index_name,
+                host=host,
+                port=port,
+                milvus_collection_name=milvus_collection_name,
+                milvus_collection_schema=collection_schema,
+                milvus_index_params=milvus_index_params,
+                batch_size=batch_size,
+                use_dataset_index_as_pk=use_dataset_index_as_pk,
+            )
+        return self
+
+    def add_milvus_index_from_external_arrays(
+        self,
+        index_name: Optional[str] = None,
+        external_arrays: Optional[np.array] = None,
+        dtype: np.dtype = np.float32,
+        column: str = None,
+        dim: int = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        milvus_collection_name: Optional[str] = None,
+        milvus_collection_schema: Optional[dict] = None,
+        milvus_index_params: Optional[dict] = {
+            "index_type": "IVF_FLAT",
+            "metric_type": "L2",
+            "params": {"nlist": 128},
+        },
+        use_dataset_index_as_pk: Optional[bool] = True,
+        batch_size: Optional[int] = 1000,
+    ):
+        """Add an index using Milvus for fast retrieval.
+
+        Args:
+            index_name (`str`):
+                The index_name/identifier of the index.
+            external_arrays (`np.array`):
+                Data arrays to insert into the index.
+                You can also insert by calling milvus_index.insert(arrays) after initialize
+            dtype (`numpy.dtype`):
+                The dtype of the numpy arrays that are indexed. Default is np.float32.
+            host (`str`, *optional*, defaults to `localhost`):
+                The host of where Milvus is running.
+            port (`int`, *optional*, defaults to 19530):
+                The port of where Milvus is running.
+            column (`str`):
+                Column to create index on it, should be a vector column like: numpy.float32.
+            dim (`int`):
+                Dimension of vector column
+            milvus_collection_name (Optional `str`):
+                Will create a collection with this name in Milvus and build index on it.
+                If not set, use the `index_name`.
+            milvus_collection_schema (Optional `List`):
+                The schema of the Milvus collection.
+                Milvus support multi-columns schema of various datatype and hybrid search with attribute filtering.
+                The collection to create must contain a primary key field and a vector field.
+                Please see https://milvus.io/docs/create_collection.md for more detail.
+                If not set, will automatically generate a schema based on dataset's schema.
+            milvus_index_params (Optional `dict`):
+                The configuration of the Milvus index. Milvus support various index type to trade-off performance and cost.
+                Please see https://milvus.io/docs/build_index.md for more detail
+                Default config is:
+                    ```
+                    {
+                        "index_type": "IVF_FLAT",
+                        "metric_type": "L2",
+                        "params": {"nlist": 128},
+                    }
+                    ```
+            use_dataset_index_as_pk (`bool`, *optional*):
+                If use dataset's index as Milvus primary key.
+            batch_size (`int`, *optional*):
+                Size of the batch to use while adding vectors to the Milvus. Default is 1000.
+        """
+
+        milvus_collection_name = (
+            milvus_collection_name
+            if milvus_collection_name is not None
+            else index_name
+        )
+
+        if milvus_collection_schema is None:
+            # auto schema
+            collection_schema = []
+            pk_column_name = "pk"
+            pk_column_schema = {
+                "name": pk_column_name,
+                "type": "INT64",
+                "auto_id": False,
+                "is_primary": True,
+            }
+            collection_schema.append(pk_column_schema)
+
+            vec_column_name = column
+
+            for col in self.column_names:
+                # skip pk_column and vector_column, already appended
+                if pk_column_name == col:
+                    continue
+
+                field_dict = {
+                    "name": col,
+                    "type": self.features.get(col).dtype.upper(),
+                }
+                if self.features.get(col).dtype == "string":
+                    field_dict["type"] = "VARCHAR"
+                    field_dict["params"] = {"max_length": 65535}
+                collection_schema.append(field_dict)
+
+            vec_column_schema = {
+                "name": vec_column_name,
+                "type": "FLOAT_VECTOR",
+                "params": {"dim": dim}
+            }
+            collection_schema.append(vec_column_schema)
+        else:
+            collection_schema = milvus_collection_schema
+
+        milvus_index_params["field"] = column
+
+        super().add_milvus_index_from_external_arrays(
+            external_arrays=external_arrays,
+            dtype=dtype,
+            host=host,
+            port=port,
+            index_name=index_name,
+            milvus_collection_name=milvus_collection_name,
+            milvus_collection_schema=collection_schema,
+            milvus_index_params=milvus_index_params,
+            batch_size=batch_size,
+            use_dataset_index_as_pk=use_dataset_index_as_pk,
+        )
+
     @transmit_format
     @fingerprint_transform(inplace=False)
     def add_item(self, item: dict, new_fingerprint: str):

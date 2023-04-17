@@ -1,6 +1,6 @@
 # Search index
 
-[FAISS](https://github.com/facebookresearch/faiss) and [ElasticSearch](https://www.elastic.co/elasticsearch/) enables searching for examples in a dataset. This can be useful when you want to retrieve specific examples from a dataset that are relevant to your NLP task. For example, if you are working on a Open Domain Question Answering task, you may want to only return examples that are relevant to answering your question.
+[FAISS](https://github.com/facebookresearch/faiss), [Milvus](https://milvus.io/)  and [ElasticSearch](https://www.elastic.co/elasticsearch/) enables searching for examples in a dataset. This can be useful when you want to retrieve specific examples from a dataset that are relevant to your NLP task. For example, if you are working on a Open Domain Question Answering task, you may want to only return examples that are relevant to answering your question.
 
 This guide will show you how to build an index for your dataset that will allow you to search it.
 
@@ -64,6 +64,80 @@ FAISS retrieves documents based on the similarity of their vector representation
 ```py
 >>> ds = load_dataset('crime_and_punish', split='train[:100]')
 >>> ds.load_faiss_index('embeddings', 'my_index.faiss')
+```
+
+## Milvus
+
+Milvus is the most popular open source vector database that focus on vectors store, query and similarity search. provides cloud scalability, high reliability and great performance. This example is modified based on the Faiss demo and shows the usage of Milvus index.
+
+1. Download the DPR model from 🤗 Transformers:
+
+```py
+>>> from transformers import DPRContextEncoder, DPRContextEncoderTokenizer
+>>> import torch
+>>> torch.set_grad_enabled(False)
+>>> ctx_encoder = DPRContextEncoder.from_pretrained("facebook/dpr-ctx_encoder-single-nq-base")
+>>> ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained("facebook/dpr-ctx_encoder-single-nq-base")
+```
+
+2. Load your dataset and compute the vector representations:
+
+```py
+>>> from datasets import load_dataset
+>>> ds = load_dataset('crime_and_punish', split='train[:100]')
+>>> ds_with_embeddings = ds.map(lambda example: {'embeddings': ctx_encoder(**ctx_tokenizer(example["line"], return_tensors="pt"))[0][0].numpy()})
+```
+
+3. Create the index with [`Dataset.add_milvus_index`]:
+
+```py
+>>> ds_with_embeddings.add_milvus_index(
+    host="localhost",
+    port="19530",
+    index_name="milvus_index",
+    column="embeddings",
+    dim=768,
+    milvus_collection_name="hf_dataset_milvus_index",
+)
+```
+
+`host` and `port` is the address of Milvus service. You can start Milvus on your machine, or see [Milvus installation guide](https://milvus.io/docs/install_standalone-operator.md) if you don’t already have it installed..
+
+`add_milvus_index` will create a collection and a index in Milvus, and insert data into it. Compared with Faiss, Milvus can not only store vector data but also various scalar data. By default, `add_milvus_index` will create a collection based on dataset's schema and a `IVF_FLAT` index. You can specific the collection schema and index type by pass optional parameters. Please see [Create collection](https://milvus.io/docs/create_collection.md) and [Build index](https://milvus.io/docs/build_index.md) for more detail.
+
+
+4. Now you can query your dataset with the `embeddings` index. Load the DPR Question Encoder, and search for a question with [`Dataset.get_nearest_examples`]:
+
+```py
+>>> from transformers import DPRQuestionEncoder, DPRQuestionEncoderTokenizer
+>>> q_encoder = DPRQuestionEncoder.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
+>>> q_tokenizer = DPRQuestionEncoderTokenizer.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
+
+>>> question = "Is it serious ?"
+>>> question_embedding = q_encoder(**q_tokenizer(question, return_tensors="pt"))[0][0].numpy()
+>>> scores, retrieved_examples = ds_with_embeddings.get_nearest_examples('milvus_index', question_embedding, k=10)
+>>> retrieved_examples["line"][0]
+'_that_ serious? It is not serious at all. It’s simply a fantasy to amuse\r\n'
+```
+
+5. You can access the index with [`Dataset.get_index`] and use it for special operations, e.g. query by id:
+
+```py
+>>> milvus_index = ds_with_embeddings.get_index('milvus_index')
+>>> query_result = milvus_index.query(query(expr="pk in [1,3,5,7,9]", limit=3))
+```
+
+6. Data will persist on Milvus whenever you create a Milvus index. If you want to delete the milvus data physically, use [`MilvusIndex.remove`]:
+
+```py
+>>> ds_with_embeddings.get_index('milvus_index').remove()
+>>> ds_with_embeddings.drop_index("milvus_index")
+```
+
+7. Reload it at a later time with [`Dataset.load_milvus_index`]:
+
+```pygi
+>>> ds.load_milvus_index(index_name='milvus_index_new',  milvus_collection_name="hf_dataset_milvus_index")
 ```
 
 ## ElasticSearch
